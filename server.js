@@ -4,31 +4,22 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const { createClient } = require("@supabase/supabase-js");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Setup Supabase
+// Supabase setup
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY // make sure your .env uses SUPABASE_SERVICE_KEY
+  process.env.SUPABASE_SERVICE_KEY
 );
 
-const PORT = process.env.PORT || 4000;
+// Resend setup
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Setup Nodemailer with Gmail OAuth2
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    type: "OAuth2",
-    user: process.env.MAIL_USER,
-    clientId: process.env.MAIL_CLIENT_ID,
-    clientSecret: process.env.MAIL_CLIENT_SECRET,
-    refreshToken: process.env.MAIL_REFRESH_TOKEN,
-  },
-});
+const PORT = process.env.PORT || 4000;
 
 // Format GitHub events into summary
 function formatEventsSummary(events, limit = 5) {
@@ -85,41 +76,86 @@ app.post("/api/send-updates", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    console.log("✅ Authorized request received");
+
     const events = await fetchGitHubEvents();
+    console.log("✅ GitHub events fetched:", events.length);
+
     const summaryText = formatEventsSummary(events, 5);
-    const htmlBody = `<p>Here are the latest GitHub public events (top 5):</p><pre>${summaryText}</pre>`;
+    console.log("✅ Summary generated:\n", summaryText);
 
     const { data: subscribers, error } = await supabase
       .from("subscribers")
       .select("email");
     if (error) throw error;
+    console.log("✅ Subscribers fetched:", subscribers);
+
     if (!subscribers.length) {
+      console.log("⚠️ No subscribers found.");
       return res.json({ ok: true, sent: 0 });
     }
 
     let sent = 0;
     for (const row of subscribers) {
-      const mailOptions = {
-        from: process.env.MAIL_USER,
-        to: row.email,
-        subject: "Your GitHub timeline update",
-        text: `Latest events:\n\n${summaryText}`,
-        html: htmlBody,
-      };
-
       try {
-        await transporter.sendMail(mailOptions);
+        console.log("📧 Sending to:", row.email);
+        await resend.emails.send({
+          from: process.env.FROM_EMAIL,
+          to: row.email,
+          subject: "Your GitHub timeline update",
+          text: `Latest events:\n\n${summaryText}`,
+          html: `<p>Here are the latest GitHub public events:</p><pre>${summaryText}</pre>`,
+        });
         sent++;
+        console.log("✅ Sent to:", row.email);
       } catch (e) {
-        console.error("Send failed for", row.email, e.message || e);
+        console.error("❌ Send failed for", row.email, e.message || e);
       }
     }
 
     return res.json({ ok: true, sent });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Server error:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Public endpoint to fetch GitHub events for frontend
+app.get("/api/events", async (req, res) => {
+  try {
+    const events = await fetchGitHubEvents();
+    const summaryText = formatEventsSummary(events, 5);
+    return res.json({ ok: true, summary: summaryText, raw: events.slice(0, 5) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to fetch GitHub events" });
+  }
+});
+
+// Trigger send updates for ONE email (for demo)
+app.post("/api/send-to-me", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Missing email" });
+
+    const events = await fetchGitHubEvents();
+    const summaryText = formatEventsSummary(events, 5);
+
+    await resend.emails.send({
+      from: process.env.FROM_EMAIL,
+      to: email,
+      subject: "Your GitHub timeline update",
+      text: `Latest events:\n\n${summaryText}`,
+      html: `<p>Here are the latest GitHub events:</p><pre>${summaryText}</pre>`,
+    });
+
+    return res.json({ ok: true, message: "Email sent successfully!" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to send email" });
+  }
+});
+
+
+
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

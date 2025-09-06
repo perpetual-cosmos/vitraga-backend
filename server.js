@@ -1,4 +1,3 @@
-// server.js
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -41,14 +40,11 @@ function formatEventsSummary(events, limit = 5) {
 async function fetchGitHubEvents() {
   const url = "https://api.github.com/events";
   const headers = { Accept: "application/vnd.github+json" };
-  if (process.env.GITHUB_TOKEN) {
-    headers.Authorization = `token ${process.env.GITHUB_TOKEN}`;
-  }
   const res = await axios.get(url, { headers });
   return res.data;
 }
 
-// Store a subscriber (called by frontend)
+// Store a subscriber
 app.post("/api/signup", async (req, res) => {
   try {
     const { email } = req.body;
@@ -80,29 +76,29 @@ app.post("/api/send-updates", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    console.log("✅ Authorized request received");
+    console.log("Authorized request received");
 
     const events = await fetchGitHubEvents();
-    console.log("✅ GitHub events fetched:", events.length);
+    console.log("GitHub events fetched:", events.length);
 
     const summaryText = formatEventsSummary(events, 5);
-    console.log("✅ Summary generated:\n", summaryText);
+    console.log("Summary generated:\n", summaryText);
 
     const { data: subscribers, error } = await supabase
       .from("subscribers")
       .select("email");
     if (error) throw error;
-    console.log("✅ Subscribers fetched:", subscribers);
+    console.log("Subscribers fetched:", subscribers);
 
     if (!subscribers.length) {
-      console.log("⚠️ No subscribers found.");
+      console.log("No subscribers found.");
       return res.json({ ok: true, sent: 0 });
     }
 
     let sent = 0;
     for (const row of subscribers) {
       try {
-        console.log("📧 Sending to:", row.email);
+        console.log("Sending to:", row.email);
         await resend.emails.send({
           from: process.env.FROM_EMAIL,
           to: row.email,
@@ -111,15 +107,15 @@ app.post("/api/send-updates", async (req, res) => {
           html: `<p>Here are the latest GitHub public events:</p><pre>${summaryText}</pre>`,
         });
         sent++;
-        console.log("✅ Sent to:", row.email);
+        console.log("Sent to:", row.email);
       } catch (e) {
-        console.error("❌ Send failed for", row.email, e.message || e);
+        console.error("Send failed for", row.email, e.message || e);
       }
     }
 
     return res.json({ ok: true, sent });
   } catch (err) {
-    console.error("❌ Server error:", err);
+    console.error("Server error:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -129,14 +125,18 @@ app.get("/api/events", async (req, res) => {
   try {
     const events = await fetchGitHubEvents();
     const summaryText = formatEventsSummary(events, 5);
-    return res.json({ ok: true, summary: summaryText, raw: events.slice(0, 5) });
+    return res.json({
+      ok: true,
+      summary: summaryText,
+      raw: events.slice(0, 5),
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to fetch GitHub events" });
   }
 });
 
-// Trigger send updates for ONE email (for demo)
+// Trigger send updates for ONE email 
 app.post("/api/send-to-me", async (req, res) => {
   try {
     const { email } = req.body;
@@ -160,6 +160,4 @@ app.post("/api/send-to-me", async (req, res) => {
   }
 });
 
-
-
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
